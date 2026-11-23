@@ -87,27 +87,51 @@ export function Campaigns() {
 function Queue({ title, sub, path, kind }) {
     const [status, setStatus] = useState('pending'); const [page, setPage] = useState(1);
     const { data, loading, reload } = useFetch(path, { status, page });
-    const { toast } = useApp();
-    const [row, setRow] = useState(null); const [act, setAct] = useState(null); const [note, setNote] = useState('');
+    const { toast, config } = useApp();
+    const [row, setRow] = useState(null); const [act, setAct] = useState(null); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false);
     const isW = kind === 'withdrawal';
-    const run = async () => {
-        try { await api(`${path}/${row.id}`, { method: 'POST', body: { action: act, note } }); toast('Done'); setRow(null); setNote(''); reload(); } catch (e) { toast(e.message, 'error'); }
+    const auto = isW && config?.payouts_enabled;
+    const close = () => { setRow(null); setNote(''); };
+    const call = async (url, body, msg = 'Done') => {
+        setBusy(true);
+        try { await api(url, { method: 'POST', body }); toast(msg); close(); reload(); } catch (e) { toast(e.message, 'error'); }
+        setBusy(false);
+    };
+    const run = () => {
+        if (act === 'send') return call(`${path}/${row.id}/send`, undefined, 'Transfer submitted to Monnify');
+        if (act === 'otp') return call(`${path}/${row.id}/otp`, { otp: note }, 'Transfer authorized');
+        return call(`${path}/${row.id}`, { action: act, note });
     };
     const pos = isW ? 'pay' : 'approve';
+    const tabs = isW ? [['pending', 'Pending'], ['processing', 'Processing'], ['paid', 'Paid'], ['rejected', 'Rejected'], ['', 'All']] : [['pending', 'Pending'], ['approved', 'Approved'], ['rejected', 'Rejected'], ['', 'All']];
+    const text = !row ? '' : act === 'send'
+        ? `Send ${naira(row.amount)} to ${row.account_name} (${row.bank_name} ${row.account_number}) through Monnify now? This moves real money and cannot be undone.`
+        : act === 'otp' ? 'Enter the OTP Monnify sent to authorize this transfer.'
+        : act === 'reject' ? (isW ? 'The amount is returned to the user wallet.' : 'The deposit will be marked rejected.')
+        : isW ? `Confirm you have already paid ${naira(row.amount)} to this account yourself (outside Monnify).` : `${naira(row.amount)} will be credited to ${row.user?.name}.`;
+    const title2 = act === 'send' ? 'Send payout' : act === 'otp' ? 'Authorize transfer' : act === 'reject' ? 'Reject request' : isW ? 'Mark as paid' : 'Approve deposit';
     return (
         <div className="animate-rise">
             <Title sub={sub}>{title}</Title>
-            <Tabs value={status} onChange={(s) => { setStatus(s); setPage(1); }} options={[['pending', 'Pending'], [isW ? 'paid' : 'approved', isW ? 'Paid' : 'Approved'], ['rejected', 'Rejected'], ['', 'All']]} />
+            <Tabs value={status} onChange={(s) => { setStatus(s); setPage(1); }} options={tabs} />
             {loading ? <Skeletons /> : data.data.length === 0 ? <Empty icon="task_alt" title="Nothing here" text="You are all caught up." /> : (
                 <><Table head={isW ? ['User', 'Amount', 'Bank details', 'Status', 'Requested', ''] : ['User', 'Amount', 'Reference', 'Status', 'Submitted', '']}>{data.data.map((r) => (
                     <tr key={r.id}><td className="td"><p className="font-semibold">{r.user?.name}</p><p className="text-xs text-ink-500">{r.user?.email}</p></td><td className="td font-display text-lg font-extrabold">{naira(r.amount)}</td>
-                        <td className="td text-sm">{isW ? <>{r.bank_name}<br /><b className="tracking-wider">{r.account_number}</b><br />{r.account_name}</> : <b>{r.reference}</b>}</td><td className="td"><Status value={r.status} />{r.note && <p className="mt-1 text-xs text-ink-500">{r.note}</p>}</td><td className="td text-xs text-ink-500">{timeFmt(r.created_at)}</td>
-                        <td className="td">{r.status === 'pending' && <div className="flex justify-end gap-1.5"><button className="btn btn-primary btn-sm" onClick={() => { setRow(r); setAct(pos); }}>{isW ? 'Mark paid' : 'Approve'}</button><button className="btn btn-ghost btn-sm !text-coral" onClick={() => { setRow(r); setAct('reject'); }}>Reject</button></div>}</td></tr>))}</Table><Pager data={data} onPage={setPage} /></>
+                        <td className="td text-sm">{isW ? <>{r.bank_name}<br /><b className="tracking-wider">{r.account_number}</b><br />{r.account_name}</> : <b>{r.reference}</b>}</td><td className="td"><Status value={r.status} />{r.note && <p className="mt-1 max-w-[14rem] text-xs text-ink-500">{r.note}</p>}</td><td className="td text-xs text-ink-500">{timeFmt(r.created_at)}</td>
+                        <td className="td"><div className="flex flex-wrap justify-end gap-1.5">
+                            {r.status === 'pending' && (<>
+                                {auto && r.bank_code ? <button className="btn btn-primary btn-sm" onClick={() => { setRow(r); setAct('send'); }}><Icon name="send_money" size={16} />Send via Monnify</button>
+                                    : <button className="btn btn-primary btn-sm" onClick={() => { setRow(r); setAct(pos); }}>{isW ? 'Mark paid' : 'Approve'}</button>}
+                                <button className="btn btn-ghost btn-sm !text-coral" onClick={() => { setRow(r); setAct('reject'); }}>Reject</button></>)}
+                            {isW && r.status === 'processing' && (<>
+                                <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => call(`${path}/${r.id}/check`, undefined, 'Status refreshed')}><Icon name="sync" size={16} />Check status</button>
+                                <button className="btn btn-ghost btn-sm" onClick={() => { setRow(r); setAct('otp'); }}>Enter OTP</button></>)}
+                        </div></td></tr>))}</Table><Pager data={data} onPage={setPage} /></>
             )}
-            <Modal open={!!row} onClose={() => setRow(null)} title={act === 'reject' ? 'Reject request' : isW ? 'Confirm payout' : 'Approve deposit'}>
-                <p className="mb-3 text-sm text-ink-500">{act === 'reject' ? (isW ? 'The amount is returned to the user wallet.' : 'The deposit will be marked rejected.') : isW ? `Confirm you have transferred ${naira(row?.amount)} to the account.` : `${naira(row?.amount)} will be credited to ${row?.user?.name}.`}</p>
-                <input className="input" placeholder="Note (optional)" maxLength={200} value={note} onChange={(e) => setNote(e.target.value)} />
-                <button className={`btn mt-4 w-full ${act === 'reject' ? 'btn-coral' : 'btn-primary'}`} onClick={run}>Confirm</button>
+            <Modal open={!!row} onClose={close} title={title2}>
+                <p className="mb-3 text-sm text-ink-500">{text}</p>
+                {act !== 'send' && <input className="input" placeholder={act === 'otp' ? 'OTP code' : 'Note (optional)'} maxLength={act === 'otp' ? 12 : 200} value={note} onChange={(e) => setNote(e.target.value)} />}
+                <button className={`btn mt-4 w-full ${act === 'reject' ? 'btn-coral' : 'btn-primary'}`} disabled={busy} onClick={run}>{busy ? 'Working...' : 'Confirm'}</button>
             </Modal>
         </div>
     );

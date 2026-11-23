@@ -11,6 +11,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Models\Withdrawal;
 use App\Services\WalletService;
+use App\Services\Notifier;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -149,7 +150,12 @@ class AdminController extends Controller
             }
         });
 
-        return response()->json($withdrawal->fresh());
+        $w = $withdrawal->fresh();
+        $data['action'] === 'pay'
+            ? Notifier::withdrawalPaid($w)
+            : Notifier::withdrawalFailed($w, 'Your withdrawal request was rejected. '.($w->note ?: ''));
+
+        return response()->json($w);
     }
 
     // ---------- Deposits ----------
@@ -172,6 +178,9 @@ class AdminController extends Controller
             if ($d->status !== 'pending') {
                 throw ValidationException::withMessages(['action' => 'Already processed.']);
             }
+            if ($data['action'] === 'approve' && $d->note === 'monnify:pending') {
+                throw ValidationException::withMessages(['action' => 'Online payments are credited automatically once Monnify confirms them. Reject it if it was abandoned.']);
+            }
             if ($data['action'] === 'approve') {
                 $d->update(['status' => 'approved', 'note' => $data['note'] ?? null]);
                 WalletService::credit($d->user, (float) $d->amount, 'deposit', 'Wallet funded (ref '.$d->reference.')');
@@ -180,7 +189,12 @@ class AdminController extends Controller
             }
         });
 
-        return response()->json($deposit->fresh());
+        $d = $deposit->fresh();
+        if ($data['action'] === 'approve') {
+            Notifier::walletFunded($d->user, (float) $d->amount);
+        }
+
+        return response()->json($d);
     }
 
     // ---------- Messages ----------

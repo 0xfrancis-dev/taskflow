@@ -1,7 +1,9 @@
 <?php
 
 use App\Http\Controllers\Admin\AdminController;
+use App\Http\Controllers\Admin\PayoutController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\MonnifyController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicController;
 use App\Http\Controllers\SubmissionController;
@@ -16,6 +18,7 @@ Route::get('/public/featured', [PublicController::class, 'featured']);
 Route::post('/contact', [PublicController::class, 'contact'])->middleware('throttle:5,1');
 Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:10,1');
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
+Route::post('/webhooks/monnify', [MonnifyController::class, 'webhook']);
 
 // ---- Signed-in users ----
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
@@ -40,6 +43,10 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::get('/wallet', [WalletController::class, 'index']);
     Route::post('/wallet/deposit', [WalletController::class, 'deposit']);
     Route::post('/wallet/withdraw', [WalletController::class, 'withdraw']);
+    Route::get('/banks', [WalletController::class, 'banks']);
+    Route::post('/wallet/resolve-account', [WalletController::class, 'resolveAccount'])->middleware('throttle:30,1');
+    Route::post('/wallet/monnify/initialize', [MonnifyController::class, 'initialize'])->middleware('throttle:10,1');
+    Route::post('/wallet/monnify/verify', [MonnifyController::class, 'verify'])->middleware('throttle:30,1');
 });
 
 // ---- Admin ----
@@ -52,6 +59,9 @@ Route::middleware(['auth:sanctum', 'active', 'admin'])->prefix('admin')->group(f
     Route::patch('/tasks/{task}', [AdminController::class, 'updateTask']);
     Route::get('/withdrawals', [AdminController::class, 'withdrawals']);
     Route::post('/withdrawals/{withdrawal}', [AdminController::class, 'actionWithdrawal']);
+    Route::post('/withdrawals/{withdrawal}/send', [PayoutController::class, 'send']);
+    Route::post('/withdrawals/{withdrawal}/check', [PayoutController::class, 'check']);
+    Route::post('/withdrawals/{withdrawal}/otp', [PayoutController::class, 'otp']);
     Route::get('/deposits', [AdminController::class, 'deposits']);
     Route::post('/deposits/{deposit}', [AdminController::class, 'actionDeposit']);
     Route::get('/messages', [AdminController::class, 'messages']);

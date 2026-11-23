@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Services\Notifier;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
@@ -28,6 +29,8 @@ class AuthController extends Controller
             'password' => $data['password'],
             'referred_by' => $referrer?->id,
         ]);
+
+        Notifier::welcome($user);
 
         return response()->json([
             'token' => $user->createToken('web')->plainTextToken,

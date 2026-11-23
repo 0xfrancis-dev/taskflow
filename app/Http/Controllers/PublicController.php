@@ -26,6 +26,11 @@ class PublicController extends Controller
             'referral_bonus' => $c['referral_bonus'],
             'platforms' => $c['platforms'],
             'payment' => $c['payment'],
+            'payouts_enabled' => app(\App\Services\MonnifyService::class)->payoutsEnabled(),
+            'withdrawal_daily_limit' => $c['withdrawal_daily_limit'],
+            'manual_funding' => $c['manual_funding'],
+            'online_payments' => (bool) (config('services.monnify.api_key') && config('services.monnify.secret_key') && config('services.monnify.contract_code')),
+            'korapay_enabled' => ! empty($c['korapay']['secret_key']),
         ]);
     }
 

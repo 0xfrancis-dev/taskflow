@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api, naira, timeFmt } from '../../lib/api';
 import { useFetch } from '../../lib/hooks';
 import { useApp } from '../../context/AppContext';
@@ -15,6 +16,54 @@ export default function Wallet() {
     const [busy, setBusy] = useState(false);
     const set = (k) => (e) => setV({ ...v, [k]: e.target.value });
     const open = (m) => { setModal(m); setV({}); setErrors({}); };
+    const [sp, setSp] = useSearchParams();
+    const [banks, setBanks] = useState([]);
+    const [acctName, setAcctName] = useState('');
+    const [resolving, setResolving] = useState(false);
+
+    // Withdrawal form: load the bank list once the modal opens.
+    useEffect(() => {
+        if (modal !== 'withdraw' || !config?.payouts_enabled || banks.length) return;
+        api('/banks').then(setBanks).catch(() => toast('Could not load banks. Close and try again.', 'error'));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [modal]);
+
+    // Verify the account name as soon as bank + 10-digit number are filled.
+    useEffect(() => {
+        setAcctName('');
+        if (modal !== 'withdraw' || !config?.payouts_enabled) return;
+        if (!v.bank_code || !/^\d{10}$/.test(v.account_number || '')) return;
+        setResolving(true);
+        api('/wallet/resolve-account', { method: 'POST', body: { bank_code: v.bank_code, account_number: v.account_number } })
+            .then((r) => setAcctName(r.account_name))
+            .catch((x) => setErrors({ account_number: [x.message] }))
+            .finally(() => setResolving(false));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [v.bank_code, v.account_number, modal]);
+
+    // Returning from Monnify checkout: confirm the payment and credit the wallet.
+    useEffect(() => {
+        const ref = sp.get('paymentReference');
+        if (!ref) return;
+        setSp({}, { replace: true });
+        api('/wallet/monnify/verify', { method: 'POST', body: { reference: ref } })
+            .then((r) => {
+                if (r.status === 'approved') toast('Payment received. Your wallet has been funded!');
+                else if (r.status === 'pending') toast('Payment is still processing. It will be credited automatically.');
+                else toast('The payment was not completed.', 'error');
+                reload(); refreshUser();
+            })
+            .catch((x) => toast(x.message, 'error'));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const payOnline = async (e) => {
+        e.preventDefault(); setBusy(true); setErrors({});
+        try {
+            const r = await api('/wallet/monnify/initialize', { method: 'POST', body: { amount: v.amount } });
+            window.location.href = r.checkout_url;
+        } catch (x) { setErrors(x.errors || {}); toast(x.message, 'error'); setBusy(false); }
+    };
 
     const submit = async (e) => {
         e.preventDefault(); setBusy(true); setErrors({});
@@ -56,11 +105,35 @@ export default function Wallet() {
             </div>
 
             <Modal open={modal === 'deposit'} onClose={() => setModal(null)} title="Fund your wallet">
-                <div className="mb-4 rounded-2xl bg-paper p-4 text-sm"><p className="font-semibold">1. Transfer to this account</p><p className="mt-1 text-ink-700">{p?.bank_name}<br /><span className="font-display text-xl font-extrabold">{p?.account_number}</span><br />{p?.account_name}</p><p className="mt-3 font-semibold">2. Submit the payment reference below</p><p className="text-ink-500">We confirm it and credit your wallet, usually within a few hours.</p></div>
-                <form onSubmit={submit} className="grid gap-4"><Field label={`Amount (min ${naira(config?.min_deposit)})`} error={e('amount')}><input className="input" type="number" required min={config?.min_deposit} onChange={set('amount')} /></Field><Field label="Payment reference / sender name" error={e('reference')}><input className="input" required onChange={set('reference')} /></Field><button className="btn btn-primary" disabled={busy}>Submit payment</button></form>
+                {config?.online_payments && (
+                    <form onSubmit={payOnline} className="grid gap-4">
+                        <Field label={`Amount (min ${naira(config?.min_deposit)})`} error={e('amount')}><input className="input" type="number" required min={config?.min_deposit} onChange={set('amount')} /></Field>
+                        <button className="btn btn-primary" disabled={busy}><Icon name="lock" size={20} />{busy ? 'Redirecting...' : 'Pay securely online'}</button>
+                        <p className="text-xs text-ink-500">Pay by card or bank transfer. Your wallet is credited automatically.</p>
+                    </form>
+                )}
+                {config?.manual_funding && (
+                    <>
+                        {config?.online_payments && <div className="my-5 flex items-center gap-3 text-xs font-semibold text-ink-300"><span className="h-px flex-1 bg-ink-100" />OR PAY MANUALLY<span className="h-px flex-1 bg-ink-100" /></div>}
+                        <div className="mb-4 rounded-2xl bg-paper p-4 text-sm"><p className="font-semibold">1. Transfer to this account</p><p className="mt-1 text-ink-700">{p?.bank_name}<br /><span className="font-display text-xl font-extrabold">{p?.account_number}</span><br />{p?.account_name}</p><p className="mt-3 font-semibold">2. Submit the payment reference below</p><p className="text-ink-500">We confirm it and credit your wallet, usually within a few hours.</p></div>
+                        <form onSubmit={submit} className="grid gap-4"><Field label="Amount" error={e('amount')}><input className="input" type="number" required min={config?.min_deposit} onChange={set('amount')} /></Field><Field label="Payment reference / sender name" error={e('reference')}><input className="input" required onChange={set('reference')} /></Field><button className="btn btn-ghost" disabled={busy}>Submit manual payment</button></form>
+                    </>
+                )}
+                {!config?.online_payments && !config?.manual_funding && <p className="rounded-2xl bg-sun-100 p-4 text-sm font-medium text-[#8a5b00]">Online payment is not available right now. Please contact support.</p>}
             </Modal>
             <Modal open={modal === 'withdraw'} onClose={() => setModal(null)} title="Withdraw to bank">
-                <form onSubmit={submit} className="grid gap-4"><Field label={`Amount (min ${naira(config?.min_withdrawal)})`} error={e('amount')}><input className="input" type="number" required min={config?.min_withdrawal} onChange={set('amount')} /></Field><Field label="Bank name" error={e('bank_name')}><input className="input" required onChange={set('bank_name')} /></Field><Field label="Account number" error={e('account_number')}><input className="input" required maxLength={10} inputMode="numeric" onChange={set('account_number')} /></Field><Field label="Account name" error={e('account_name')}><input className="input" required onChange={set('account_name')} /></Field><button className="btn btn-primary" disabled={busy}>Request withdrawal</button></form>
+                {config?.payouts_enabled ? (
+                    <form onSubmit={submit} className="grid gap-4">
+                        <Field label={`Amount (min ${naira(config?.min_withdrawal)})`} error={e('amount')}><input className="input" type="number" required min={config?.min_withdrawal} onChange={set('amount')} /></Field>
+                        <Field label="Bank"><select className="input" required value={v.bank_code || ''} onChange={set('bank_code')}><option value="">{banks.length ? 'Select your bank' : 'Loading banks...'}</option>{banks.map((b) => <option key={b.code} value={b.code}>{b.name}</option>)}</select></Field>
+                        <Field label="Account number" error={e('account_number')}><input className="input" required maxLength={10} inputMode="numeric" onChange={set('account_number')} /></Field>
+                        {(resolving || acctName) && <div className="flex items-center gap-2 rounded-2xl bg-mint-100 px-4 py-3 text-sm font-semibold text-[#0b7a5c]"><Icon name={resolving ? 'progress_activity' : 'verified'} size={20} className={resolving ? 'animate-spin' : ''} />{resolving ? 'Verifying account...' : acctName}</div>}
+                        <p className="text-xs text-ink-500">Daily limit {naira(config?.withdrawal_daily_limit)}. Payouts are sent to your bank after approval.</p>
+                        <button className="btn btn-primary" disabled={busy || !acctName}>Request withdrawal</button>
+                    </form>
+                ) : (
+                    <form onSubmit={submit} className="grid gap-4"><Field label={`Amount (min ${naira(config?.min_withdrawal)})`} error={e('amount')}><input className="input" type="number" required min={config?.min_withdrawal} onChange={set('amount')} /></Field><Field label="Bank name" error={e('bank_name')}><input className="input" required onChange={set('bank_name')} /></Field><Field label="Account number" error={e('account_number')}><input className="input" required maxLength={10} inputMode="numeric" onChange={set('account_number')} /></Field><Field label="Account name" error={e('account_name')}><input className="input" required onChange={set('account_name')} /></Field><button className="btn btn-primary" disabled={busy}>Request withdrawal</button></form>
+                )}
             </Modal>
         </div>
     );

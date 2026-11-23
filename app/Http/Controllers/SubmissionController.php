@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Submission;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\Notifier;
 use App\Services\WalletService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -44,6 +45,8 @@ class SubmissionController extends Controller
                 'proof_image' => $request->hasFile('proof_image') ? $request->file('proof_image')->store('proofs', 'public') : null,
             ]);
         });
+
+        Notifier::newSubmission($task->user, $task, $user);
 
         return response()->json($submission, 201);
     }
@@ -99,6 +102,9 @@ class SubmissionController extends Controller
             }
         });
 
-        return response()->json($submission->fresh());
+        $done = $submission->fresh()->load('task', 'user');
+        Notifier::submissionReviewed($done);
+
+        return response()->json($done);
     }
 }

@@ -63,7 +63,7 @@ export function Typewriter({ phrases, className = '' }) {
 }
 
 const STATUS = {
-    pending: 'bg-sun-100 text-[#8a5b00]', approved: 'bg-mint-100 text-[#0b7a5c]', paid: 'bg-mint-100 text-[#0b7a5c]',
+    pending: 'bg-sun-100 text-[#8a5b00]', processing: 'bg-violet-100 text-violet-600', approved: 'bg-mint-100 text-[#0b7a5c]', paid: 'bg-mint-100 text-[#0b7a5c]',
     active: 'bg-mint-100 text-[#0b7a5c]', completed: 'bg-violet-100 text-violet-600', paused: 'bg-sun-100 text-[#8a5b00]',
     rejected: 'bg-coral-100 text-[#b3321f]', closed: 'bg-ink-100 text-ink-500', suspended: 'bg-coral-100 text-[#b3321f]',
 };
